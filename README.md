@@ -1,4 +1,4 @@
-# GNOME Shell Extension - Transparent Top Bar
+# GNOME Shell Extension - Floating transparent top bar
 
 A GNOME Shell extension that brings back the transparent top bar when free-floating in GNOME Shell 3.32.
 
@@ -18,22 +18,6 @@ Attached top bar.
 
 This program is distributed under the terms of the GNU General Public License, version 2 or later.
 
-## Development
+## Development 
 
-### Wayland
-
-Start child shell instance with reloaded extensions
-```
-MUTTER_DEBUG_DUMMY_MODE_SPECS=1920x1080 dbus-run-session -- gnome-shell --nested --wayland
-```
-
-### Xorg
-
-Reload shell by pressing ALT+F2 type r in the input then enter.
-
-### Compile schemas
-```
-cd ~/.local/share/gnome-shell/extensions/transparent-top-bar@ftpix.com
-glib-compile-schemas schemas/
-```
-
+See forked [project](https://github.com/lamarios/gnome-shell-extension-transparent-top-bar)
