@@ -1,0 +1,17 @@
+#panel.transparent-top-bar--solid {
+  transition-duration: 300ms;
+}
+
+#panel.transparent-top-bar--transparent {
+  transition-duration: 500ms;
+}
+
+#panel.floating{
+    margin: 3px;
+  border-radius: 9999px;
+}
+
+#panel.solid{
+    margin: 0;
+  border-radius: 0;
+}

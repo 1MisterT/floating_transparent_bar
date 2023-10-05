@@ -1,29 +1,43 @@
-import Meta from 'gi://Meta';
-import St from 'gi://St';
-import GLib from 'gi://GLib';
+const {Meta, St} = imports.gi;
 
-import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
-import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+const Main = imports.ui.main;
+const GLib = imports.gi.GLib;
 
-export default class TransparentTopBarWithCustomTransparencyExtension extends Extension {
-    constructor(metadata) {
-        super(metadata);
+const Config = imports.misc.config;
+const [major] = Config.PACKAGE_VERSION.split('.');
+const shellVersion = Number.parseInt(major);
+
+const ExtensionUtils = imports.misc.extensionUtils;
+
+/**
+ * https://developer.mozilla.org/docs/Web/API/WindowOrWorkerGlobalScope/setTimeout
+ * https://developer.mozilla.org/docs/Web/API/WindowOrWorkerGlobalScope/clearTimeout
+ */
+window.setTimeout = function(func, delay, ...args) {
+    return GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
+        func(...args);
+        return GLib.SOURCE_REMOVE;
+    });
+};
+
+window.clearTimeout = GLib.source_remove;
+
+class Extension {
+    constructor() {
         this._actorSignalIds = null;
         this._windowSignalIds = null;
-        this._delayedTimeoutId = null;
         this.transparencyChangeDebounce = null;
         this.darkFullScreenChangeDebounce = null;
     }
 
     enable() {
-
-        this._settings = this.getSettings('com.ftpix.transparentbar');
+        this._settings = ExtensionUtils.getSettings('com.ftpix.transparentbar');
         this._currentTransparency = this._settings.get_int('transparency');
-        this._darkFullScreen = this._settings.get_boolean('dark-full-screen');
+        this._darkFullScreen = shellVersion >= 40 ? this._settings.get_boolean('dark-full-screen') : true;
 
         this._actorSignalIds = new Map();
         this._windowSignalIds = new Map();
-        this._settings.connect('changed', (settings, key) => this.transparencyChanged(settings, key));
+        this._settings.connect('changed', this.transparencyChanged.bind(this));
         this._actorSignalIds.set(Main.overview, [
             Main.overview.connect('showing', this._updateTransparent.bind(this)),
             Main.overview.connect('hiding', this._updateTransparent.bind(this))
@@ -42,42 +56,37 @@ export default class TransparentTopBarWithCustomTransparencyExtension extends Ex
             global.window_group.connect('actor-removed', this._onWindowActorRemoved.bind(this))
         ]);
 
-        //Use a delayed version of _updateTransparent to let the shell catch up
         this._actorSignalIds.set(global.window_manager, [
-            global.window_manager.connect('switch-workspace', this._updateTransparentDelayed.bind(this))
+            global.window_manager.connect('switch-workspace', this._updateTransparent.bind(this))
         ]);
 
         this._updateTransparent();
     }
 
     transparencyChanged(settings, key) {
-
         if (key === 'transparency') {
-            GLib.source_remove(this.transparencyChangeDebounce);
-            this.transparencyChangeDebounce = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
+            clearTimeout(this.settingChangeDebounce);
+            this.settingChangeDebounce = setTimeout(() => {
                 const oldTransparency = this._currentTransparency;
                 this._currentTransparency = this._settings.get_int('transparency');
-                Main.panel.remove_style_class_name('transparent-top-bar-' + oldTransparency);
+                Main.panel.remove_style_class_name('transparent-top-bar--transparent-' + oldTransparency);
                 this._updateTransparent();
-            });
+            }, 250);
             return;
         }
 
-        if (key === 'dark-full-screen') {
-            this._darkFullScreen = this._settings.get_boolean('dark-full-screen');
-            GLib.source_remove(this.darkFullScreenChangeDebounce);
-            this.darkFullScreenChangeDebounce = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
-                Main.panel.remove_style_class_name('transparent-top-bar-' + this._currentTransparency);
+        if(key === 'dark-full-screen'){
+            this._darkFullScreen = shellVersion >= 40 ? this._settings.get_boolean('dark-full-screen') : true;
+            clearTimeout(this.darkFullScreenChangeDebounce);
+            this.darkFullScreenChangeDebounce = setTimeout(() => {
+                Main.panel.remove_style_class_name('transparent-top-bar--transparent-' + this._currentTransparency);
                 this._updateTransparent();
-            });
+            }, 250);
             return;
         }
     }
 
     disable() {
-        GLib.source_remove(this.transparencyChangeDebounce);
-        GLib.source_remove(this.darkFullScreenChangeDebounce);
-
         for (const actorSignalIds of [this._actorSignalIds, this._windowSignalIds]) {
             for (const [actor, signalIds] of actorSignalIds) {
                 for (const signalId of signalIds) {
@@ -87,11 +96,6 @@ export default class TransparentTopBarWithCustomTransparencyExtension extends Ex
         }
         this._actorSignalIds = null;
         this._windowSignalIds = null;
-
-        if (this._delayedTimeoutId != null) {
-            GLib.Source.remove(this._delayedTimeoutId);
-        }
-        this._delayedTimeoutId = null;
 
         this._setTransparent(false);
         this._settings = null;
@@ -112,16 +116,8 @@ export default class TransparentTopBarWithCustomTransparencyExtension extends Ex
         this._updateTransparent();
     }
 
-    _updateTransparentDelayed() {
-        this._delayedTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
-            this._updateTransparent();
-            this._delayedTimeoutId = null;
-            return GLib.SOURCE_REMOVE;
-        });
-    }
-
     _updateTransparent() {
-        if (!this._darkFullScreen) {
+        if(!this._darkFullScreen){
             this._setTransparent(true);
             return
         }
@@ -151,8 +147,9 @@ export default class TransparentTopBarWithCustomTransparencyExtension extends Ex
         const panelBottom = panelTop + Main.panel.get_height();
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const isNearEnough = windows.some(metaWindow => {
-            const verticalPosition = metaWindow.get_frame_rect().y;
-            return verticalPosition < panelBottom + 5 * scale;
+            return metaWindow.get_maximized();
+            //const verticalPosition = metaWindow.get_frame_rect().y;
+            //return verticalPosition < panelBottom + 5 * scale;
         });
 
         this._setTransparent(!isNearEnough);
@@ -161,12 +158,20 @@ export default class TransparentTopBarWithCustomTransparencyExtension extends Ex
     _setTransparent(transparent) {
         const transparency = this._settings.get_int("transparency");
         if (transparent) {
-            Main.panel.add_style_class_name('transparent-top-bar');
-            Main.panel.add_style_class_name('transparent-top-bar-' + transparency);
+            console.log('add floating');
+            
+            Main.panel.remove_style_class_name('solid');
+            Main.panel.add_style_class_name('floating');
         } else {
-            Main.panel.remove_style_class_name('transparent-top-bar');
-            Main.panel.remove_style_class_name('transparent-top-bar-' + transparency);
+        console.log('add solid');
+            Main.panel.add_style_class_name('solid');
+            Main.panel.remove_style_class_name('floating');
+            
         }
     }
 
 };
+
+function init() {
+    return new Extension();
+}
